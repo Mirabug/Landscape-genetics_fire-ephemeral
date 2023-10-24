@@ -1,0 +1,119 @@
+
+```{r}
+species   <- "ActiFors"
+dataset   <- "DAct22-7189"
+dataset_   <- "DAct22-7322"
+
+RandR_raw <- "/Users/jorda/OneDrive/Documents/Honours Code/GitHub/Actinotus_git/beta code/raw/"
+basedir   <- "/Users/jorda/OneDrive/Documents/Honours Code/GitHub/Actinotus_git/beta code/"
+
+ActiFors_meta <- read_csv("ActiFors/meta/ActiFors_DAct22-7189_meta.v0002.csv")
+
+```
+
+
+```{r}
+d1        <- read_dart_onerow_csv(RandR_raw,species,dataset_, seq2fa=FALSE, fnum=2)
+qc1       <- report_dart_qc_stats(d1, basedir, species, dataset, threshold_missing_loci = 0.8)
+
+
+d2        <- remove.poor.quality.snps(d1, min_repro=0.96, max_missing=0.2)
+qc2       <- report_dart_qc_stats(d2, basedir, species, dataset_)
+
+d3        <- sample.one.snp.per.locus.random(d2, seed=12345) 
+qc3       <- report_dart_qc_stats(d3, basedir, species, dataset_)
+
+
+v         <- "v0002"
+m1        <- read_meta_info(d1, basedir, species, dataset, version=v)
+
+dm        <- merge_gt_meta_data(d1, m1)
+
+setdiff( d1$sample_names, m1$sample_names)
+
+dmv       <- arrange_data_by_analysis_field(dm, "micro", basedir, species, dataset_)
+
+dmv2        <- remove.poor.quality.snps(dmv, min_repro=0.96, max_missing=0.1)
+qmv2       <- report_dart_qc_stats(dmv2, basedir, species, dataset_)
+
+dmv3        <- sample.one.snp.per.locus.random(dmv2, seed=12345) 
+qmv3       <- report_dart_qc_stats(dmv3, basedir, species, dataset_)
+
+
+identical(rownames(dmv3$gt), dmv3$sample_names)
+
+```
+
+#re-order
+
+```{r}
+# dmv4 <- dmv3 orders by dmv3$meta$lat
+
+meta_arr <- cbind(dmv3$sample_names, dmv3$meta$lat, dmv3$meta$analyses$micro)
+meta_arr <- as.data.frame(meta_arr)
+names(meta_arr)[1] <- 'sample'
+names(meta_arr)[2] <- 'lat'
+names(meta_arr)[3] <- 'micro'
+meta_arr <- group_by(meta_arr, micro)
+meta_arr <- arrange(meta_arr, lat, .by_group = FALSE)
+
+dmv4 = dmv3
+#sort the key matrix
+dmv4$gt=dmv3$gt[as.vector(meta_arr$sample), ]
+
+#sort sample names at top level
+dmv4$sample_names<-as.vector(meta_arr$sample)
+dma<-data.frame(dmv4$meta$analyses)
+
+#move to modern data system
+all<-data.frame(dma,lat=dmv4$meta$lat,long=dmv4$meta$long,sample_names=dmv4$meta$sample_names,site=dmv4$meta$site)
+
+#sort based on your vector from above using modern tools
+all %>%
+  slice(match(as.vector(meta_arr$sample), sample_names))->all_sorted
+
+all(all_sorted$sample_names == as.vector(meta_arr$sample)) # check sorting
+
+#back to old system, this could be rationalized but I don't want to break anything downstream
+
+dmv4$meta<-as.list(all_sorted[,10:13])
+
+dmv4$meta$analyses <-as.list(as.list(all_sorted[,1:9]))
+
+```
+
+# running snmf, pca, kin and Fst
+```{r}
+# run a pca
+gl_file    <- dart2gl(dmv4, basedir, species, dataset_, return_as_file=TRUE)
+run_PCA(gl_file, basedir, species, dataset_, dmv4$treatment)
+```
+
+```{r}
+# run sNMF
+lea_file <- dart2lea(dmv4, basedir, species, dataset_)
+run_SNMF(lea_file, basedir, species, dataset_, dmv4$treatment)
+plot_SNMF(basedir, species, dataset_, dmv4$treatment)
+```
+
+```{r}
+# run allelic richness and Fis
+gp_fil <- dart2genepop(dmv4,basedir,species,dataset_, pop=dmv4$meta$analyses$S,maf_val=0.1)
+gp_out <- run_diveRsity(gp_fil)
+
+```
+
+```{r}
+# run site pwFst and populatin Fst
+pwFst <- population.pw.Fst(dmv4,dmv4$meta$analyses$S ,basedir,species,dataset_,maf_val = 0.1, miss_val = 0.1)
+
+dart_data <- dmv4
+meta <- dmv4$meta
+   p    <- dmv4$meta$analyses$S
+   pop_info <- get.population.info(meta, p, method="average")
+   gds_file <- dart2gds(dart_data, basedir, species, dataset_)
+   gds      <- snpgdsOpen(gds_file)
+
+ fst      <- snpgdsFst(gds, population=as.factor(p), method="W&H02", sample.id=dart_data$sample_names, maf=0.1, missing.rate=0.1, with.id=TRUE)
+```
+
