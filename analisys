@@ -1,27 +1,24 @@
 
 ```{r}
-species   <- "ActiFors"
-dataset   <- "DAct22-7189"
-dataset_   <- "DAct22-7322"
+species   <- "ActiFors" # Change for species
+dataset   <- "DAct22-7322" # Change for dataset
 
-RandR_raw <- "/Users/jorda/OneDrive/Documents/Honours Code/GitHub/Actinotus_git/beta code/raw/"
-basedir   <- "/Users/jorda/OneDrive/Documents/Honours Code/GitHub/Actinotus_git/beta code/"
+RandR_raw <- "/raw/"
+basedir   <- "/"
 
-ActiFors_meta <- read_csv("ActiFors/meta/ActiFors_DAct22-7189_meta.v0002.csv")
-
+ActiFors_meta <- read_csv("ActiFors/meta/ActiFors_DAct22-73229_meta.v0002.csv")
 ```
 
-
 ```{r}
-d1        <- read_dart_onerow_csv(RandR_raw,species,dataset_, seq2fa=FALSE, fnum=2)
+d1        <- read_dart_onerow_csv(RandR_raw,species,dataset, seq2fa=FALSE, fnum=2)
 qc1       <- report_dart_qc_stats(d1, basedir, species, dataset, threshold_missing_loci = 0.8)
 
 
 d2        <- remove.poor.quality.snps(d1, min_repro=0.96, max_missing=0.2)
-qc2       <- report_dart_qc_stats(d2, basedir, species, dataset_)
+qc2       <- report_dart_qc_stats(d2, basedir, species, dataset)
 
 d3        <- sample.one.snp.per.locus.random(d2, seed=12345) 
-qc3       <- report_dart_qc_stats(d3, basedir, species, dataset_)
+qc3       <- report_dart_qc_stats(d3, basedir, species, dataset)
 
 
 v         <- "v0002"
@@ -31,69 +28,66 @@ dm        <- merge_gt_meta_data(d1, m1)
 
 setdiff( d1$sample_names, m1$sample_names)
 
-dmv       <- arrange_data_by_analysis_field(dm, "micro", basedir, species, dataset_)
+dmv       <- arrange_data_by_analysis_field(dm, "micro", basedir, species, dataset)
 
 dmv2        <- remove.poor.quality.snps(dmv, min_repro=0.96, max_missing=0.1)
-qmv2       <- report_dart_qc_stats(dmv2, basedir, species, dataset_)
+qmv2       <- report_dart_qc_stats(dmv2, basedir, species, dataset)
 
 dmv3        <- sample.one.snp.per.locus.random(dmv2, seed=12345) 
-qmv3       <- report_dart_qc_stats(dmv3, basedir, species, dataset_)
+qmv3       <- report_dart_qc_stats(dmv3, basedir, species, dataset)
 
 
 identical(rownames(dmv3$gt), dmv3$sample_names)
 
 ```
 
-#re-order
-
 ```{r}
-# dmv4 <- dmv3 orders by dmv3$meta$lat
+site_info <- cbind(dmv3$meta$sample_names, dmv3$meta$long,  dmv3$meta$lat, dmv3$meta$analyses$S)
+colnames(site_info) <- c("sample", "long", "lat", "site")
+npfires <- shapefile("/Users/61487/Documents/IBE analysis/fire_npwsfirehistory/NPWSFireHistory.shp")
 
-meta_arr <- cbind(dmv3$sample_names, dmv3$meta$lat, dmv3$meta$analyses$micro)
-meta_arr <- as.data.frame(meta_arr)
-names(meta_arr)[1] <- 'sample'
-names(meta_arr)[2] <- 'lat'
-names(meta_arr)[3] <- 'micro'
-meta_arr <- group_by(meta_arr, micro)
-meta_arr <- arrange(meta_arr, lat, .by_group = FALSE)
+long_lat <- cbind(site_info$long, site_info$lat)
+colnames(long_lat) <- c("long", "lat")
+long_lat_af <- SpatialPoints(coords = (long_lat),proj4string=CRS("+proj=longlat +ellps=GRS80 +no_defs"))
 
-dmv4 = dmv3
-#sort the key matrix
-dmv4$gt=dmv3$gt[as.vector(meta_arr$sample), ]
+sffires <- st_as_sf(npfires)
+long_lat_sf <- st_as_sf(long_lat_af)
+long_lat_un <- distinct(long_lat_sf)
+long_lat_buff <- st_buffer(long_lat_un, 0.008)
+intersection <- st_intersection(sffires, long_lat_buff)
+ss <- sffires[rownames(sffires) %in% rownames(intersection), ]
+sss <- ss[ss$Label != '2019-20 Wildfire' ,]
+bs <- sffires[sffires$Label == '2019-20 Wildfire' ,]
+bss <- bs[rownames(bs) %in% rownames(intersection), ]
 
-#sort sample names at top level
-dmv4$sample_names<-as.vector(meta_arr$sample)
-dma<-data.frame(dmv4$meta$analyses)
+sf_oz <- ozmap("states")
+sf_crop <- st_crop(sf_oz, xmin= 146, ymin= -38, xmax= 153, ymax= -32)
+# Define custom axis labels
+x_values <- seq(146, 153, by = 0.5)  # Adjust as needed
+y_values <- seq(-38, -32, by = 0.5)
+col <- c("#edf8b1","#c7e9b4","#7fcdbb","#41b6c4","#1d91c0","#225ea8","#253494")
 
-#move to modern data system
-all<-data.frame(dma,lat=dmv4$meta$lat,long=dmv4$meta$long,sample_names=dmv4$meta$sample_names,site=dmv4$meta$site)
-
-#sort based on your vector from above using modern tools
-all %>%
-  slice(match(as.vector(meta_arr$sample), sample_names))->all_sorted
-
-all(all_sorted$sample_names == as.vector(meta_arr$sample)) # check sorting
-
-#back to old system, this could be rationalized but I don't want to break anything downstream
-
-dmv4$meta<-as.list(all_sorted[,10:13])
-
-dmv4$meta$analyses <-as.list(as.list(all_sorted[,1:9]))
-
+plot(st_geometry(sf_crop), xaxs = "i", yaxs = "i", axes=TRUE, xaxt = "n", yaxt = "n", xlab = "Longitude", ylab = "Latitude", xlim = c(146, 153), ylim = c(-38, -32))
+plot(st_geometry(sf_crop_oz), col= "white", axes=TRUE, xaxt = "n", yaxt = "n", add=TRUE)
+plot(st_geometry(bss), col= "pink", lty=0 , add=TRUE)
+plot(st_geometry(sss), col = alpha(col, 0.7), add=TRUE, lty = 0)
+points(long_lat_af, col="black", pch = 17, cex=0.7, lwd=0.8)
+axis(1, at = x_values, labels = x_values)
+axis(2, at = y_values, labels = y_values)
 ```
 
-# running snmf, pca, kin and Fst
+
 ```{r}
 # run a pca
-gl_file    <- dart2gl(dmv4, basedir, species, dataset_, return_as_file=TRUE)
-run_PCA(gl_file, basedir, species, dataset_, dmv4$treatment)
+gl_file    <- dart2gl(dmv3, basedir, species, dataset, return_as_file=TRUE)
+run_PCA(gl_file, basedir, species, dataset_, dmv3$treatment)
 ```
 
 ```{r}
 # run sNMF
-lea_file <- dart2lea(dmv4, basedir, species, dataset_)
-run_SNMF(lea_file, basedir, species, dataset_, dmv4$treatment)
-plot_SNMF(basedir, species, dataset_, dmv4$treatment)
+lea_file <- dart2lea(dmv4, basedir, species, dataset)
+run_SNMF(lea_file, basedir, species, dataset, dmv4$treatment)
+plot_SNMF(basedir, species, dataset, dmv4$treatment)
 ```
 
 ```{r}
@@ -105,15 +99,23 @@ gp_out <- run_diveRsity(gp_fil)
 
 ```{r}
 # run site pwFst and populatin Fst
-pwFst <- population.pw.Fst(dmv4,dmv4$meta$analyses$S ,basedir,species,dataset_,maf_val = 0.1, miss_val = 0.1)
+pwFst <- population.pw.Fst(dmv3,dmv3$meta$analyses$S ,basedir,species,dataset,maf_val = 0.1, miss_val = 0.1)
 
-dart_data <- dmv4
-meta <- dmv4$meta
-   p    <- dmv4$meta$analyses$S
-   pop_info <- get.population.info(meta, p, method="average")
-   gds_file <- dart2gds(dart_data, basedir, species, dataset_)
-   gds      <- snpgdsOpen(gds_file)
+dist.calc <- function(long_lat){
 
- fst      <- snpgdsFst(gds, population=as.factor(p), method="W&H02", sample.id=dart_data$sample_names, maf=0.1, missing.rate=0.1, with.id=TRUE)
+n <- nrow(long_lat)
+s <- mat.or.vec(n, n)
+
+for (a in 1:n){
+  lla <- c(long_lat[a, 2], long_lat[a, 3])
+  for (b in 1:n){
+    llb <- c(long_lat[b, 2], long_lat[b, 3])
+    d <- distCosine(lla, llb)
+    s[a, b] <- d
+  }
+}
+return(s)
+}
+dist <- dist.calc(long_lat)
 ```
 
